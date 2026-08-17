@@ -6,6 +6,92 @@ import os
 DATA_FILE = "data.json"
 
 
+class CardListbox(tk.Frame):
+    """
+    Liste façon 'cartes' : chaque élément est affiché dans sa propre case
+    bien cadrée avec une grande police, au lieu d'un Listbox classique.
+    Expose une API compatible avec le sous-ensemble de tk.Listbox utilisé
+    dans l'application (insert, delete, get, curselection, size).
+    """
+
+    def __init__(self, parent, font=("Segoe UI", 20, "bold"),
+                 selectbackground="#f48fb1", bg="white",
+                 fg="#2d2d2d", item_bg="#fdfbfc", border_color="#d9a5b8",
+                 **kwargs):
+        super().__init__(parent, bg=bg)
+        self.font = font
+        self.selectbackground = selectbackground
+        self.item_bg = item_bg
+        self.fg = fg
+        self.border_color = border_color
+
+        self.items = []
+        self.selected_index = None
+
+        self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0)
+        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.inner = tk.Frame(self.canvas, bg=bg)
+
+        self.inner.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
+
+    def _on_canvas_resize(self, event):
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+
+    def insert(self, index, value):
+        self.items.append(value)
+        self._render()
+
+    def delete(self, start, end=None):
+        if end == tk.END:
+            self.items = []
+            self.selected_index = None
+        else:
+            idx = start
+            if 0 <= idx < len(self.items):
+                del self.items[idx]
+                if self.selected_index == idx:
+                    self.selected_index = None
+                elif self.selected_index is not None and self.selected_index > idx:
+                    self.selected_index -= 1
+        self._render()
+
+    def get(self, start, end=None):
+        if end is None:
+            return self.items[start]
+        return tuple(self.items)
+
+    def curselection(self):
+        return (self.selected_index,) if self.selected_index is not None else ()
+
+    def size(self):
+        return len(self.items)
+
+    def _select(self, idx):
+        self.selected_index = idx
+        self._render()
+
+    def _render(self):
+        for w in self.inner.winfo_children():
+            w.destroy()
+        for i, val in enumerate(self.items):
+            is_sel = (i == self.selected_index)
+            card_bg = self.selectbackground if is_sel else self.item_bg
+            card = tk.Frame(self.inner, bg=card_bg, bd=1, relief="solid",
+                             highlightbackground=self.border_color, highlightthickness=1)
+            card.pack(fill="x", padx=8, pady=5)
+            lbl = tk.Label(card, text=val, font=self.font, bg=card_bg, fg=self.fg,
+                            anchor="w", padx=16, pady=14, cursor="hand2")
+            lbl.pack(fill="x")
+            lbl.bind("<Button-1>", lambda e, i=i: self._select(i))
+            card.bind("<Button-1>", lambda e, i=i: self._select(i))
+
+
 class RobotControlApp:
     def __init__(self, root):
         self.root = root
@@ -97,7 +183,7 @@ class RobotControlApp:
 
         right_buttons = [
             ("Start", self.colors["button_green"], self.move_all_selected),
-            ("Stop", self.colors["button_red"], lambda: self.send_command({"command": "stopAllMotors"})),
+            ("Stop", self.colors["button_red"], self.stop_all_motors),
         ]
 
         def make_top_bar_button(text, color, cmd):
@@ -140,7 +226,7 @@ class RobotControlApp:
                 indicatoron=False, width=3, bg=row_bg, fg=self.colors["section_title"],
                 selectcolor=self.colors["check_bg"],
                 relief="raised", bd=2, highlightthickness=0, cursor="hand2",
-                command=lambda m=motor_id: self.refresh_select_button(m)
+                command=lambda m=motor_id: self.on_motor_toggle(m)
             )
             select_cb.pack(expand=True, ipadx=6, ipady=10, padx=8, pady=8)
             self.axis_vars[motor_id]["select_button"] = select_cb
@@ -183,6 +269,29 @@ class RobotControlApp:
         btn.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
         return btn
 
+    def on_motor_toggle(self, motor_id):
+        # Si le moteur vient d'être désélectionné, son angle repasse à 0
+        if not self.axis_vars[motor_id]["selected"].get():
+            entry = self.angle_entries[motor_id]
+            entry.configure(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, "0")
+        self.refresh_select_button(motor_id)
+
+    def reset_all_motors(self):
+        # Désélectionne tous les moteurs et remet tous les angles à 0
+        for motor_id in range(1, 7):
+            self.axis_vars[motor_id]["selected"].set(False)
+            entry = self.angle_entries[motor_id]
+            entry.configure(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, "0")
+            self.refresh_select_button(motor_id)
+
+    def stop_all_motors(self):
+        self.send_command({"command": "stopAllMotors"})
+        self.reset_all_motors()
+
     def refresh_select_button(self, motor_id):
         is_selected = self.axis_vars[motor_id]["selected"].get()
 
@@ -218,9 +327,9 @@ class RobotControlApp:
         if self.active_overlay:
             self.active_overlay.destroy()
         
-        # On superpose sur la zone centrale (laisse l'en-tête ligne 0 et la colonne angle libre)
+        # On superpose sur la zone centrale (laisse la colonne angle libre à droite)
         self.active_overlay = tk.Frame(self.table_container, bg="white", bd=2, relief="solid")
-        self.active_overlay.place(relx=0.01, rely=0.15, relwidth=0.78, relheight=0.83)
+        self.active_overlay.place(relx=0.005, rely=0.02, relwidth=0.85, relheight=0.97)
         return self.active_overlay
 
     def hide_overlay(self):
@@ -236,32 +345,37 @@ class RobotControlApp:
 
     def show_numeric_keypad_overlay(self, motor_id):
         container = self.show_overlay()
+        container.configure(bg="white")
 
         title = tk.Label(
             container,
-            text=f"Saisir l'angle pour {self.axis_names[motor_id]} (0 - 90)",
+            text=f"Saisir l'angle pour {self.axis_names[motor_id]}  (0 - 90)",
             font=("Segoe UI", 16, "bold"),
-            bg="white",
-            fg="#1f2937"
+            bg=self.colors["header"],
+            fg="white",
+            pady=16
         )
-        title.pack(pady=(10, 5))
+        title.pack(fill="x", side="top")
 
         display_val = tk.StringVar(value=self.angle_entries[motor_id].get())
 
         display = tk.Entry(
             container,
             textvariable=display_val,
-            font=("Consolas", 24, "bold"),
+            font=("Consolas", 26, "bold"),
             justify="center",
-            bd=2,
-            relief="solid",
+            bd=0,
+            relief="flat",
             bg="#fdfbf7",
-            fg="#c2185b"
+            fg=self.colors["button_primary"],
+            highlightthickness=2,
+            highlightbackground=self.colors["header"],
+            highlightcolor=self.colors["header"]
         )
-        display.pack(fill="x", padx=150, pady=(0, 10), ipady=5)
+        display.pack(fill="x", padx=150, pady=(20, 15), ipady=10)
 
         keypad_frame = tk.Frame(container, bg="white")
-        keypad_frame.pack(padx=80, pady=5, fill="both", expand=True)
+        keypad_frame.pack(padx=80, pady=(0, 20), fill="both", expand=True)
 
         buttons = [
             ("7", 0, 0), ("8", 0, 1), ("9", 0, 2),
@@ -291,27 +405,33 @@ class RobotControlApp:
                 display_val.set(curr + text)
 
         for text, row, col in buttons:
-            bg = "#e91e63"
-            fg = "white"
+            bg = self.colors["table_header"]
+            fg = self.colors["text_dark"]
+            active_bg = "#f0bcd2"
             if text == "C":
-                bg = "#ef5350"
+                bg = self.colors["button_red"]
+                fg = "white"
+                active_bg = "#a91f1f"
             elif text == "OK":
-                bg = "#43a047"
+                bg = self.colors["button_green"]
+                fg = "white"
+                active_bg = "#245e26"
 
             btn = tk.Button(
                 keypad_frame,
                 text=text,
-                font=("Segoe UI", 16, "bold"),
+                font=("Segoe UI", 20, "bold"),
                 bg=bg,
                 fg=fg,
-                activebackground=bg,
+                activebackground=active_bg,
                 activeforeground=fg,
-                relief="flat",
-                bd=0,
+                relief="solid",
+                bd=1,
+                highlightbackground=self.colors["header"],
                 cursor="hand2",
                 command=lambda t=text: on_num_click(t)
             )
-            btn.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
+            btn.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
 
         for i in range(3):
             keypad_frame.grid_columnconfigure(i, weight=1)
@@ -320,15 +440,17 @@ class RobotControlApp:
 
     def show_text_keypad_overlay(self, title_text, callback_action):
         container = self.show_overlay()
+        container.configure(bg="white")
 
         title = tk.Label(
             container,
             text=title_text,
             font=("Segoe UI", 16, "bold"),
-            bg="white",
-            fg="#1f2937"
+            bg=self.colors["header"],
+            fg="white",
+            pady=16
         )
-        title.pack(pady=(10, 5))
+        title.pack(fill="x", side="top")
 
         display_val = tk.StringVar()
 
@@ -337,15 +459,18 @@ class RobotControlApp:
             textvariable=display_val,
             font=("Consolas", 22, "bold"),
             justify="center",
-            bd=2,
-            relief="solid",
+            bd=0,
+            relief="flat",
             bg="#fdfbf7",
-            fg="#6d1533"
+            fg=self.colors["section_title"],
+            highlightthickness=2,
+            highlightbackground=self.colors["header"],
+            highlightcolor=self.colors["header"]
         )
-        display.pack(fill="x", padx=100, pady=(0, 10), ipady=5)
+        display.pack(fill="x", padx=100, pady=(16, 12), ipady=8)
 
         keypad_frame = tk.Frame(container, bg="white")
-        keypad_frame.pack(padx=20, pady=5, fill="both", expand=True)
+        keypad_frame.pack(padx=20, pady=(0, 16), fill="both", expand=True)
 
         for i in range(11):
             keypad_frame.grid_columnconfigure(i, weight=1)
@@ -375,13 +500,14 @@ class RobotControlApp:
                 btn = tk.Button(
                     keypad_frame,
                     text=text,
-                    font=("Segoe UI", 12, "bold"),
-                    bg="#e91e63",
-                    fg="white",
-                    activebackground="#e91e63",
-                    activeforeground="white",
-                    relief="flat",
-                    bd=0,
+                    font=("Segoe UI", 14, "bold"),
+                    bg=self.colors["table_header"],
+                    fg=self.colors["text_dark"],
+                    activebackground="#f0bcd2",
+                    activeforeground=self.colors["text_dark"],
+                    relief="solid",
+                    bd=1,
+                    highlightbackground=self.colors["header"],
                     cursor="hand2",
                     command=lambda t=text: on_text_click(t)
                 )
@@ -392,36 +518,40 @@ class RobotControlApp:
             btn = tk.Button(
                 keypad_frame,
                 text=text,
-                font=("Segoe UI", 12, "bold"),
-                bg="#e91e63",
-                fg="white",
-                activebackground="#e91e63",
-                activeforeground="white",
-                relief="flat",
-                bd=0,
+                font=("Segoe UI", 14, "bold"),
+                bg=self.colors["table_header"],
+                fg=self.colors["text_dark"],
+                activebackground="#f0bcd2",
+                activeforeground=self.colors["text_dark"],
+                relief="solid",
+                bd=1,
+                highlightbackground=self.colors["header"],
                 cursor="hand2",
                 command=lambda t=text: on_text_click(t)
             )
             btn.grid(row=3, column=col_idx, padx=4, pady=4, sticky="nsew")
 
         btn_clr = tk.Button(
-            keypad_frame, text="CLR", font=("Segoe UI", 12, "bold"),
-            bg="#ef5350", fg="white", activebackground="#ef5350", activeforeground="white",
-            relief="flat", bd=0, cursor="hand2", command=lambda: on_text_click("CLR")
+            keypad_frame, text="CLR", font=("Segoe UI", 14, "bold"),
+            bg=self.colors["button_red"], fg="white", activebackground="#a91f1f", activeforeground="white",
+            relief="solid", bd=1, highlightbackground=self.colors["header"], cursor="hand2",
+            command=lambda: on_text_click("CLR")
         )
         btn_clr.grid(row=3, column=6, columnspan=1, padx=4, pady=4, sticky="nsew")
 
         btn_ok = tk.Button(
-            keypad_frame, text="OK", font=("Segoe UI", 12, "bold"),
-            bg="#43a047", fg="white", activebackground="#43a047", activeforeground="white",
-            relief="flat", bd=0, cursor="hand2", command=lambda: on_text_click("OK")
+            keypad_frame, text="OK", font=("Segoe UI", 14, "bold"),
+            bg=self.colors["button_green"], fg="white", activebackground="#245e26", activeforeground="white",
+            relief="solid", bd=1, highlightbackground=self.colors["header"], cursor="hand2",
+            command=lambda: on_text_click("OK")
         )
         btn_ok.grid(row=3, column=7, columnspan=2, padx=4, pady=4, sticky="nsew")
 
         btn_annuler = tk.Button(
-            keypad_frame, text="ANNULER", font=("Segoe UI", 12, "bold"),
-            bg="#5f6b7a", fg="white", activebackground="#5f6b7a", activeforeground="white",
-            relief="flat", bd=0, cursor="hand2", command=lambda: on_text_click("ANNULER")
+            keypad_frame, text="ANNULER", font=("Segoe UI", 14, "bold"),
+            bg=self.colors["button_gray"], fg="white", activebackground="#414a55", activeforeground="white",
+            relief="solid", bd=1, highlightbackground=self.colors["header"], cursor="hand2",
+            command=lambda: on_text_click("ANNULER")
         )
         btn_annuler.grid(row=3, column=9, columnspan=2, padx=4, pady=4, sticky="nsew")
 
@@ -470,7 +600,8 @@ class RobotControlApp:
 
             self.saved_positions[position_name] = position_data
             self.save_data_to_file()
-            
+            self.reset_all_motors()
+
         self.show_text_keypad_overlay("Enregistrer la position sous le nom :", proceed_save)
 
     def load_saved_position(self):
@@ -484,7 +615,9 @@ class RobotControlApp:
         main_frame = tk.Frame(container, bg="white", bd=1, relief="solid")
         main_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
-        listbox = tk.Listbox(main_frame, font=("Consolas", 14), bd=0, highlightthickness=0, selectbackground=self.colors["row_selected"])
+        listbox = CardListbox(main_frame, font=("Segoe UI", 20, "bold"),
+                               selectbackground=self.colors["row_selected"], bg="white",
+                               fg=self.colors["text_dark"])
         listbox.pack(fill="both", expand=True, padx=5, pady=5)
 
         def refresh_list():
@@ -558,12 +691,14 @@ class RobotControlApp:
             right_frame = tk.LabelFrame(content, text=" Ordre ", font=("Segoe UI", 10, "bold"), bg="white")
             right_frame.pack(side="left", fill="both", expand=True, padx=5)
 
-            available_listbox = tk.Listbox(left_frame, font=("Consolas", 12), bg="white", bd=0, highlightthickness=0)
+            available_listbox = CardListbox(left_frame, font=("Segoe UI", 16, "bold"), bg="white",
+                                             fg=self.colors["text_dark"], selectbackground="#f8bbd0")
             available_listbox.pack(fill="both", expand=True, padx=5, pady=5)
             for position_name in self.saved_positions.keys():
                 available_listbox.insert(tk.END, position_name)
 
-            ordered_listbox = tk.Listbox(right_frame, font=("Consolas", 12), bg="white", bd=0, highlightthickness=0, selectbackground="#bbdefb")
+            ordered_listbox = CardListbox(right_frame, font=("Segoe UI", 16, "bold"), bg="white",
+                                           fg=self.colors["text_dark"], selectbackground="#bbdefb")
             ordered_listbox.pack(fill="both", expand=True, padx=5, pady=5)
 
             def add_position():
@@ -581,10 +716,10 @@ class RobotControlApp:
                     self.save_data_to_file()
                 self.hide_overlay()
 
-            tk.Button(center_frame, text="Add ➔", command=add_position, bg=self.colors["button_primary"], fg="white", font=("Segoe UI", 10, "bold"), width=8, pady=4).pack(pady=4)
-            tk.Button(center_frame, text="✕ Del", command=remove_position, bg=self.colors["button_red"], fg="white", font=("Segoe UI", 10, "bold"), width=8, pady=4).pack(pady=4)
-            tk.Button(center_frame, text="SAVE", command=save_link_selection, bg=self.colors["button_green"], fg="white", font=("Segoe UI", 10, "bold"), width=8, pady=6).pack(pady=4)
-            tk.Button(center_frame, text="RETOUR", command=self.hide_overlay, bg=self.colors["button_gray"], fg="white", font=("Segoe UI", 10, "bold"), width=8, pady=4).pack(pady=4)
+            tk.Button(center_frame, text="Add ➔", command=add_position, bg=self.colors["button_primary"], fg="white", font=("Segoe UI", 14, "bold"), width=10, pady=14).pack(pady=10)
+            tk.Button(center_frame, text="✕ Del", command=remove_position, bg=self.colors["button_red"], fg="white", font=("Segoe UI", 14, "bold"), width=10, pady=14).pack(pady=10)
+            tk.Button(center_frame, text="SAVE", command=save_link_selection, bg=self.colors["button_green"], fg="white", font=("Segoe UI", 14, "bold"), width=10, pady=14).pack(pady=10)
+            tk.Button(center_frame, text="RETOUR", command=self.hide_overlay, bg=self.colors["button_gray"], fg="white", font=("Segoe UI", 14, "bold"), width=10, pady=14).pack(pady=10)
 
         self.show_text_keypad_overlay("Nom de la liaison à créer :", proceed_create_link)
 
@@ -599,7 +734,9 @@ class RobotControlApp:
         main_frame = tk.Frame(container, bg="white", bd=1, relief="solid")
         main_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
-        listbox = tk.Listbox(main_frame, font=("Consolas", 14), bd=0, highlightthickness=0, selectbackground=self.colors["row_selected"])
+        listbox = CardListbox(main_frame, font=("Segoe UI", 20, "bold"),
+                               selectbackground=self.colors["row_selected"], bg="white",
+                               fg=self.colors["text_dark"])
         listbox.pack(fill="both", expand=True, padx=5, pady=5)
 
         def refresh_link_list():
