@@ -131,9 +131,11 @@ class RobotControlApp:
 
         # Garde en mémoire le panneau actif (overlay) qui recouvre temporairement la zone centrale
         self.active_overlay = None
+        import threading
         try:
              self.uart = serial.Serial("/dev/ttyS2", 115200, timeout=1)  # remplace par ton port trouvé
              self.uart.write(b'{"command":"initAll"}\n')
+             threading.Thread(target=self._read_uart_loop, daemon=True).start()
         except Exception as e:
              self.uart = None
              print(f"UART indisponible : {e}")
@@ -792,7 +794,15 @@ class RobotControlApp:
 
         self.send_command({"command": "moveMotors", "motors": motors_list})
         self.root.after(self.link_delay_ms, lambda: self.execute_link_sequence(positions_sequence, index + 1))
-
+    def _read_uart_loop(self):
+        while True:
+            try:
+                line = self.uart.readline().decode("utf-8", errors="ignore").strip()
+                if line:
+                    self.log(f"STM32 -> {line}")
+            except Exception as e:
+                self.log(f"Erreur lecture UART : {e}")
+                break
     def log(self, message):
         print(message)
 
