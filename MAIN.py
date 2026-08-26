@@ -1,7 +1,7 @@
 import tkinter as tk
 import json
 import os
-
+import serial
 # Fichier de sauvegarde persistante pour les positions et les liaisons
 DATA_FILE = "data.json"
 
@@ -131,7 +131,13 @@ class RobotControlApp:
 
         # Garde en mémoire le panneau actif (overlay) qui recouvre temporairement la zone centrale
         self.active_overlay = None
-
+        try:
+             self.uart = serial.Serial("/dev/ttyS0", 115200, timeout=1)  # remplace par ton port trouvé
+             self.uart.write(b'{"command":"initAll"}\n')
+        except Exception as e:
+             self.uart = None
+             print(f"UART indisponible : {e}")
+        
         self.load_data_from_file()
         self.build_ui()
 
@@ -790,9 +796,14 @@ class RobotControlApp:
     def log(self, message):
         print(message)
 
-    def send_command(self, command_dict):
-        json_command = json.dumps(command_dict, ensure_ascii=False)
-        self.log(json_command)
+   def send_command(self, command_dict):
+    json_command = json.dumps(command_dict, ensure_ascii=False)
+    self.log(json_command)
+    if self.uart:
+        try:
+            self.uart.write((json_command + "\n").encode("utf-8"))
+        except Exception as e:
+            self.log(f"Erreur UART : {e}")
 
 
 if __name__ == "__main__":
