@@ -133,17 +133,23 @@ class RobotControlApp:
 
         self.active_overlay = None
 
-        # Initialisation UART & Thread d'écoute
+        # Initialisation UART & Thread d'écoute (Callback)
         try:
             self.uart = serial.Serial("/dev/ttyS2", 115200, timeout=1)
             self.uart.write(b'{"command":"initAll"}\n')
-            threading.Thread(target=self._uart_read_loop, daemon=True).start()
+            self.start_uart_listener()  # <--- Hna rj3na l'appel dyal start_uart_listener
         except Exception as e:
             self.uart = None
             print(f"UART indisponible : {e}")
         
         self.load_data_from_file()
         self.build_ui()
+
+    def start_uart_listener(self):
+        """Lance un thread d'écoute en arrière-plan pour recevoir les messages de l'STM32"""
+        if self.uart:
+            self.listener_thread = threading.Thread(target=self._uart_read_loop, daemon=True)
+            self.listener_thread.start()
 
     def _uart_read_loop(self):
         """Boucle d'écoute continue de l'UART"""
