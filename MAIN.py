@@ -132,7 +132,7 @@ class RobotControlApp:
         # Garde en mémoire le panneau actif (overlay) qui recouvre temporairement la zone centrale
         self.active_overlay = None
         try:
-             self.uart = serial.Serial("/dev/ttyS0", 115200, timeout=1)  # remplace par ton port trouvé
+             self.uart = serial.Serial("/dev/ttyS2", 115200, timeout=1)  # remplace par ton port trouvé
              self.uart.write(b'{"command":"initAll"}\n')
         except Exception as e:
              self.uart = None
