@@ -132,6 +132,32 @@ class RobotControlApp:
         # Garde en mémoire le panneau actif (overlay) qui recouvre temporairement la zone centrale
         self.active_overlay = None
         import threading
+        def start_uart_listener(self):
+           """Lance un thread d'écoute en arrière-plan pour recevoir les messages de l'STM32"""
+           if self.uart:
+              self.listener_thread = threading.Thread(target=self._uart_read_loop, daemon=True)
+              self.listener_thread.start()
+
+        def _uart_read_loop(self):
+           """Boucle d'écoute continue de l'UART (agit comme un callback de réception)"""
+           while self.uart and self.uart.is_open:
+            try:
+                if self.uart.in_waiting > 0:
+                    line = self.uart.readline().decode('utf-8', errors='ignore').strip()
+                    if line:
+                        # Appel du callback de traitement sur le thread principal de Tkinter
+                        self.root.after(0, lambda l=line: self.on_uart_message_received(l))
+             except Exception as e:
+                print(f"Erreur lecture UART : {e}")
+                break
+
+        def on_uart_message_received(self, message):
+           """Callback exécuté chaque fois que l'STM32 envoie un message"""
+           self.log(f"STM32 ➔ Python : {message}")
+        # Hna t9dr t-traiter la reponse (bhal "OK", "ERR", wla position dyal les moteurs)
+           if message == "OK":
+            # Action ila jat OK
+              pass
         try:
              self.uart = serial.Serial("/dev/ttyS2", 115200, timeout=1)  # remplace par ton port trouvé
              self.uart.write(b'{"command":"initAll"}\n')
