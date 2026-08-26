@@ -2,6 +2,8 @@ import tkinter as tk
 import json
 import os
 import serial
+import threading
+
 # Fichier de sauvegarde persistante pour les positions et les liaisons
 DATA_FILE = "data.json"
 
@@ -83,10 +85,10 @@ class CardListbox(tk.Frame):
             is_sel = (i == self.selected_index)
             card_bg = self.selectbackground if is_sel else self.item_bg
             card = tk.Frame(self.inner, bg=card_bg, bd=1, relief="solid",
-                             highlightbackground=self.border_color, highlightthickness=1)
+                           highlightbackground=self.border_color, highlightthickness=1)
             card.pack(fill="x", padx=8, pady=5)
             lbl = tk.Label(card, text=val, font=self.font, bg=card_bg, fg=self.fg,
-                            anchor="w", padx=16, pady=14, cursor="hand2")
+                           anchor="w", padx=16, pady=14, cursor="hand2")
             lbl.pack(fill="x")
             lbl.bind("<Button-1>", lambda e, i=i: self._select(i))
             card.bind("<Button-1>", lambda e, i=i: self._select(i))
@@ -104,7 +106,7 @@ class RobotControlApp:
         self.root.attributes("-fullscreen", True)
         self.root.lift()
         self.root.focus_force()
-        self.root.bind("<Escape>", lambda e: self.root.destroy()) # Permet de quitter avec la touche Échap
+        self.root.bind("<Escape>", lambda e: self.root.destroy())
         self.root.configure(bg="#f4f6f8")
 
         self.axis_names = {
@@ -116,7 +118,7 @@ class RobotControlApp:
         self.angle_entries = {}
         self.saved_positions = {}
         self.saved_links = {}
-        self.link_delay_ms = 2000 # Délai d'attente entre deux positions lors d'une liaison
+        self.link_delay_ms = 2000
 
         self.colors = {
             "bg_main": "#f4f6f8", "header": "#7b1e3a", "header_text": "#ffffff",
@@ -129,45 +131,36 @@ class RobotControlApp:
             "log_fg": "#f8d7e3", "check_bg": "#ffe4ee"
         }
 
-        # Garde en mémoire le panneau actif (overlay) qui recouvre temporairement la zone centrale
         self.active_overlay = None
-        import threading
-        def start_uart_listener(self):
-           """Lance un thread d'écoute en arrière-plan pour recevoir les messages de l'STM32"""
-           if self.uart:
-              self.listener_thread = threading.Thread(target=self._uart_read_loop, daemon=True)
-              self.listener_thread.start()
 
-        def _uart_read_loop(self):
-           """Boucle d'écoute continue de l'UART (agit comme un callback de réception)"""
-           while self.uart and self.uart.is_open:
-            try:
-                if self.uart.in_waiting > 0:
-                    line = self.uart.readline().decode('utf-8', errors='ignore').strip()
-                    if line:
-                        # Appel du callback de traitement sur le thread principal de Tkinter
-                        self.root.after(0, lambda l=line: self.on_uart_message_received(l))
-            except Exception as e:
-                print(f"Erreur lecture UART : {e}")
-                break
-
-        def on_uart_message_received(self, message):
-           """Callback exécuté chaque fois que l'STM32 envoie un message"""
-           self.log(f"STM32 ➔ Python : {message}")
-        # Hna t9dr t-traiter la reponse (bhal "OK", "ERR", wla position dyal les moteurs)
-           if message == "OK":
-            # Action ila jat OK
-              pass
+        # Initialisation UART & Thread d'écoute
         try:
-             self.uart = serial.Serial("/dev/ttyS2", 115200, timeout=1)  # remplace par ton port trouvé
-             self.uart.write(b'{"command":"initAll"}\n')
-             threading.Thread(target=self._read_uart_loop, daemon=True).start()
+            self.uart = serial.Serial("/dev/ttyS2", 115200, timeout=1)
+            self.uart.write(b'{"command":"initAll"}\n')
+            threading.Thread(target=self._uart_read_loop, daemon=True).start()
         except Exception as e:
-             self.uart = None
-             print(f"UART indisponible : {e}")
+            self.uart = None
+            print(f"UART indisponible : {e}")
         
         self.load_data_from_file()
         self.build_ui()
+
+    def _uart_read_loop(self):
+        """Boucle d'écoute continue de l'UART"""
+        while self.uart and self.uart.is_open:
+            try:
+                line = self.uart.readline().decode("utf-8", errors="ignore").strip()
+                if line:
+                    self.root.after(0, lambda l=line: self.on_uart_message_received(l))
+            except Exception as e:
+                self.log(f"Erreur lecture UART : {e}")
+                break
+
+    def on_uart_message_received(self, message):
+        """Callback exécuté chaque fois que l'STM32 envoie un message"""
+        self.log(f"STM32 -> {message}")
+        if message == "OK":
+            pass
 
     def load_data_from_file(self):
         if os.path.exists(DATA_FILE):
@@ -192,11 +185,8 @@ class RobotControlApp:
 
     def build_ui(self):
         self.build_top_bar()
-        
-        # Conteneur principal de la grille
         self.body_container = tk.Frame(self.root, bg=self.colors["bg_main"])
         self.body_container.pack(fill="both", expand=True)
-
         self.build_table_view()
 
     def build_top_bar(self):
@@ -231,16 +221,13 @@ class RobotControlApp:
         self.table_view_frame = tk.Frame(self.body_container, bg=self.colors["card_bg"], bd=1, relief="solid")
         self.table_view_frame.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # Création de la grille principale
         self.table_container = tk.Frame(self.table_view_frame, bg=self.colors["card_bg"])
         self.table_container.pack(fill="both", expand=True, padx=8, pady=8)
 
-        # En-têtes (Ligne 0) - Resteront toujours visibles !
         headers = ["Select", "Axis", "Jog -", "Jog +", "Angle"]
         for col, header in enumerate(headers):
             tk.Label(self.table_container, text=header, font=("Segoe UI", 18, "bold"), bg=self.colors["table_header"],
-                     fg=self.colors["text_dark"], pady=18, relief="groove", bd=1).grid(row=0, column=col, sticky="nsew",
-                                                                                       padx=1, pady=1)
+                     fg=self.colors["text_dark"], pady=18, relief="groove", bd=1).grid(row=0, column=col, sticky="nsew", padx=1, pady=1)
 
         for motor_id in range(1, 7):
             selected_var = tk.BooleanVar(value=False)
@@ -267,15 +254,12 @@ class RobotControlApp:
             axis_label.grid(row=motor_id, column=1, sticky="nsew", padx=1, pady=1)
             self.axis_vars[motor_id]["axis_label"] = axis_label
 
-            jog_left_btn = self.make_button(self.table_container, "◀️", row_bg, lambda m=motor_id: self.jog_angle(m, -1),
-                                            motor_id, 2)
-            jog_right_btn = self.make_button(self.table_container, "▶️", row_bg, lambda m=motor_id: self.jog_angle(m, 1),
-                                             motor_id, 3)
+            jog_left_btn = self.make_button(self.table_container, "◀️", row_bg, lambda m=motor_id: self.jog_angle(m, -1), motor_id, 2)
+            jog_right_btn = self.make_button(self.table_container, "▶️", row_bg, lambda m=motor_id: self.jog_angle(m, 1), motor_id, 3)
 
             self.axis_vars[motor_id]["jog_left_btn"] = jog_left_btn
             self.axis_vars[motor_id]["jog_right_btn"] = jog_right_btn
 
-            # Colonne Angle (Colonne 4) - Restera toujours visible à droite !
             angle_entry = tk.Entry(self.table_container, width=6, font=("Consolas", 20, "bold"), justify="center", bg=row_bg,
                                    fg=self.colors["text_dark"], relief="solid", bd=2, cursor="hand2")
             angle_entry.insert(0, "0")
@@ -300,7 +284,6 @@ class RobotControlApp:
         return btn
 
     def on_motor_toggle(self, motor_id):
-        # Si le moteur vient d'être désélectionné, son angle repasse à 0
         if not self.axis_vars[motor_id]["selected"].get():
             entry = self.angle_entries[motor_id]
             entry.configure(state="normal")
@@ -309,7 +292,6 @@ class RobotControlApp:
         self.refresh_select_button(motor_id)
 
     def reset_all_motors(self):
-        # Désélectionne tous les moteurs et remet tous les angles à 0
         for motor_id in range(1, 7):
             self.axis_vars[motor_id]["selected"].set(False)
             entry = self.angle_entries[motor_id]
@@ -353,17 +335,14 @@ class RobotControlApp:
         axis_label.configure(bg=row_color)
 
     def show_overlay(self):
-        # Ne supprime plus la grille ! Utilise .place() pour se superposer uniquement sur les lignes d'axes (lignes 1 à 6, colonnes 0 à 3)
         if self.active_overlay:
             self.active_overlay.destroy()
         
-        # On superpose sur la zone centrale (laisse la colonne angle libre à droite)
         self.active_overlay = tk.Frame(self.table_container, bg="white", bd=2, relief="solid")
         self.active_overlay.place(relx=0.005, rely=0.02, relwidth=0.85, relheight=0.97)
         return self.active_overlay
 
     def hide_overlay(self):
-        # Retire simplement le clavier de l'écran pour dévoiler les commandes sous-jacentes
         if self.active_overlay:
             self.active_overlay.destroy()
             self.active_overlay = None
@@ -820,15 +799,7 @@ class RobotControlApp:
 
         self.send_command({"command": "moveMotors", "motors": motors_list})
         self.root.after(self.link_delay_ms, lambda: self.execute_link_sequence(positions_sequence, index + 1))
-    def _read_uart_loop(self):
-        while True:
-            try:
-                line = self.uart.readline().decode("utf-8", errors="ignore").strip()
-                if line:
-                    self.log(f"STM32 -> {line}")
-            except Exception as e:
-                self.log(f"Erreur lecture UART : {e}")
-                break
+
     def log(self, message):
         print(message)
 
