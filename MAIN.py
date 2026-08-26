@@ -796,14 +796,14 @@ class RobotControlApp:
     def log(self, message):
         print(message)
 
-   def send_command(self, command_dict):
-    json_command = json.dumps(command_dict, ensure_ascii=False)
-    self.log(json_command)
-    if self.uart:
-        try:
-            self.uart.write((json_command + "\n").encode("utf-8"))
-        except Exception as e:
-            self.log(f"Erreur UART : {e}")
+    def send_command(self, command_dict):
+        json_command = json.dumps(command_dict, ensure_ascii=False)
+        self.log(json_command)
+        if self.uart:
+            try:
+                self.uart.write((json_command + "\n").encode("utf-8"))
+            except Exception as e:
+                self.log(f"Erreur UART : {e}")
 
 
 if __name__ == "__main__":
