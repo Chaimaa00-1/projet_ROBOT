@@ -147,7 +147,7 @@ class RobotControlApp:
                     if line:
                         # Appel du callback de traitement sur le thread principal de Tkinter
                         self.root.after(0, lambda l=line: self.on_uart_message_received(l))
-             except Exception as e:
+            except Exception as e:
                 print(f"Erreur lecture UART : {e}")
                 break
 
